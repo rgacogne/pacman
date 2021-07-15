@@ -91,6 +91,10 @@ libarchive = dependency('libarchive',
                         version : '>=3.0.0',
                         static : get_option('buildstatic'))
 
+libcap = dependency('libcap',
+                    static : get_option('buildstatic'))
+conf.set('HAVE_LIBCAP', libcap.found())
+
 libcurl = dependency('libcurl',
                      version : '>=7.55.0',
                      required : get_option('curl'),
@@ -120,7 +124,12 @@ else
   error('unhandled crypto value @0@'.format(want_crypto))
 endif
 
+libseccomp = dependency('libseccomp',
+                        static : get_option('buildstatic'))
+conf.set('HAVE_LIBSECCOMP', libseccomp.found())
+
 foreach header : [
+    'linux/landlock.h',
     'mntent.h',
     'sys/mnttab.h',
     'sys/mount.h',
@@ -341,7 +350,7 @@ pacman_bin = executable(
   pacman_sources,
   include_directories : includes,
   link_with : [libalpm, libcommon],
-  dependencies : [libarchive],
+  dependencies : [libarchive, libcap, libseccomp],
   install : true,
 )
 
@@ -350,7 +359,7 @@ executable(
   pacman_conf_sources,
   include_directories : includes,
   link_with : [libalpm, libcommon],
-  dependencies : [libarchive],
+  dependencies : [libarchive, libcap, libseccomp],
   install : true,
 )
 

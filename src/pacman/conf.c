@@ -25,6 +25,7 @@
 #include <glob.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/capability.h>
 #include <string.h> /* strdup */
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -210,12 +211,236 @@ static char *get_tempfile(const char *path, const char *filename)
 	return tempfile;
 }
 
+#ifdef HAVE_LINUX_LANDLOCK_H
+# include <linux/landlock.h>
+# include <sys/prctl.h>
+# include <sys/syscall.h>
+#ifndef landlock_create_ruleset
+static inline int landlock_create_ruleset(const struct landlock_ruleset_attr *const attr,
+                       const size_t size, const __u32 flags)
+{
+       return syscall(__NR_landlock_create_ruleset, attr, size, flags);
+}
+#endif
+
+#ifndef landlock_add_rule
+static inline int landlock_add_rule(const int ruleset_fd,
+                 const enum landlock_rule_type rule_type,
+                 const void *const rule_attr, const __u32 flags)
+{
+       return syscall(__NR_landlock_add_rule, ruleset_fd, rule_type,
+                       rule_attr, flags);
+}
+#endif
+
+#ifndef landlock_restrict_self
+static inline int landlock_restrict_self(const int ruleset_fd, const __u32 flags)
+{
+       return syscall(__NR_landlock_restrict_self, ruleset_fd, flags);
+}
+#endif
+
+#define _LANDLOCK_ACCESS_FS_WRITE ( \
+  LANDLOCK_ACCESS_FS_WRITE_FILE | \
+  LANDLOCK_ACCESS_FS_REMOVE_DIR | \
+  LANDLOCK_ACCESS_FS_REMOVE_FILE | \
+  LANDLOCK_ACCESS_FS_MAKE_CHAR | \
+  LANDLOCK_ACCESS_FS_MAKE_DIR | \
+  LANDLOCK_ACCESS_FS_MAKE_REG | \
+  LANDLOCK_ACCESS_FS_MAKE_SOCK | \
+  LANDLOCK_ACCESS_FS_MAKE_FIFO | \
+  LANDLOCK_ACCESS_FS_MAKE_BLOCK | \
+  LANDLOCK_ACCESS_FS_MAKE_SYM)
+
+#define _LANDLOCK_ACCESS_FS_READ ( \
+  LANDLOCK_ACCESS_FS_READ_FILE | \
+  LANDLOCK_ACCESS_FS_READ_DIR)
+
+void sandbox_write_only_beneath_cwd(void)
+{
+  const struct landlock_ruleset_attr ruleset_attr = {
+    .handled_access_fs = \
+      _LANDLOCK_ACCESS_FS_READ | \
+      _LANDLOCK_ACCESS_FS_WRITE | \
+      LANDLOCK_ACCESS_FS_EXECUTE,
+  };
+  struct landlock_path_beneath_attr path_beneath = {
+    .allowed_access = _LANDLOCK_ACCESS_FS_WRITE,
+  };
+  int ruleset_fd;
+
+  ruleset_fd = landlock_create_ruleset(&ruleset_attr, sizeof(ruleset_attr), 0);
+  if(ruleset_fd < 0) {
+    return;
+  }
+
+  path_beneath.parent_fd = open(".", O_PATH | O_CLOEXEC | O_DIRECTORY);
+
+  if(!landlock_add_rule(ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &path_beneath, 0)) {
+    prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+    if(landlock_restrict_self(ruleset_fd, 0)) {
+      perror ("landlock_restrict_self");
+    }
+  } else {
+    perror ("landlock_add_rule");
+  }
+
+  close(path_beneath.parent_fd);
+  close(ruleset_fd);
+}
+#endif /* HAVE_LINUX_LANDLOCK_H */
+
+#ifdef HAVE_LIBSECCOMP
+#include <seccomp.h>
+
+static int sandbox_filter_syscalls(void)
+{
+	int ret = 0;
+	/* see https://docs.docker.com/engine/security/seccomp/ for inspiration,
+		 as well as systemd's src/shared/seccomp-util.c */
+	const char* denied_syscalls[] = {
+		/* kernel modules */
+		"delete_module",
+		"finit_module",
+		"init_module",
+		/* mount */
+		"chroot",
+		"fsconfig",
+		"fsmount",
+		"fsopen",
+		"fspick",
+		"mount",
+		"move_mount",
+		"open_tree",
+		"pivot_root",
+		"umount",
+		"umount2",
+		/* keyring */
+		"add_key",
+		"keyctl",
+		"request_key",
+		/* CPU emulation */
+		"modify_ldt",
+		"subpage_prot",
+		"switch_endian",
+		"vm86",
+		"vm86old",
+		/* debug */
+		"kcmp",
+		"lookup_dcookie",
+		"perf_event_open",
+		"ptrace",
+		"rtas",
+		"sys_debug_setcontext",
+		/* set clock */
+		"adjtimex",
+		"clock_adjtime",
+		"clock_adjtime64",
+		"clock_settime",
+		"clock_settime64",
+		"settimeofday",
+		/* raw IO */
+		"ioperm",
+		"iopl",
+		"pciconfig_iobase",
+		"pciconfig_read",
+		"pciconfig_write",
+		/* kexec */
+		"kexec_file_load",
+		"kexec_load",
+		/* reboot */
+		"reboot",
+		/* privileged */
+		"acct",
+		"bpf",
+		"personality",
+		/* obsolete */
+		"_sysctl",
+		"afs_syscall",
+		"bdflush",
+		"break",
+		"create_module",
+		"ftime",
+		"get_kernel_syms",
+		"getpmsg",
+		"gtty",
+		"idle",
+		"lock",
+		"mpx",
+		"prof",
+		"profil",
+		"putpmsg",
+		"query_module",
+		"security",
+		"sgetmask",
+		"ssetmask",
+		"stime",
+		"stty",
+		"sysfs",
+		"tuxcall",
+		"ulimit",
+		"uselib",
+		"ustat",
+		"vserver",
+		/* swap */
+		"swapon",
+		"swapoff",
+	};
+	/* allow all syscalls that are not listed */
+	size_t idx;
+	scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_ALLOW);
+	if(ctx == NULL) {
+		return errno;
+	}
+
+	for (idx = 0; idx < sizeof(denied_syscalls) / sizeof(*denied_syscalls); idx++) {
+		int syscall = seccomp_syscall_resolve_name(denied_syscalls[idx]);
+		if(syscall != __NR_SCMP_ERROR) {
+			if(seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), syscall, 0) != 0) {
+				pm_printf(ALPM_LOG_WARNING, _("Error blocking syscall %s\n"), denied_syscalls[idx]);
+			}
+		}
+	}
+
+	if(seccomp_load(ctx) != 0) {
+		ret = errno;
+	}
+
+	seccomp_release(ctx);
+	return ret;
+}
+#endif /* HAVE_LIBSECCOMP */
+
+static int sandbox_child(void)
+{
+	int ret = 0;
+#ifdef HAVE_LIBSECCOMP
+	ret = sandbox_filter_syscalls();
+#endif /* HAVE_LIBSECCOMP */
+
+	cap_t caps = cap_get_proc();
+	cap_clear(caps);
+	if(cap_set_mode(CAP_MODE_NOPRIV) != 0) {
+		cap_free(caps);
+		ret = errno;
+	}
+	if(cap_set_proc(caps) != 0) {
+		cap_free(caps);
+		ret = errno;
+	}
+	cap_free(caps);
+#ifdef HAVE_LINUX_LANDLOCK_H
+	ret = sandbox_write_only_beneath_cwd();
+#endif /* HAVE_LINUX_LANDLOCK_H */
+	return ret;
+}
+
 /* system()/exec() hybrid function allowing exec()-style direct execution
  * of a command with the simplicity of system()
  * - not thread-safe
  * - errno may be set by fork(), pipe(), or execvp()
  */
-static int systemvp(const char *file, char *const argv[])
+static int systemvp(const char *file, char *const argv[], bool sandbox)
 {
 	int pid, err = 0, ret = -1, err_fd[2];
 	sigset_t oldblock;
@@ -241,6 +466,13 @@ static int systemvp(const char *file, char *const argv[])
 		sigaction(SIGINT, &oldint, NULL);
 		sigaction(SIGQUIT, &oldquit, NULL);
 		sigprocmask(SIG_SETMASK, &oldblock, NULL);
+
+		if (sandbox) {
+			ret = sandbox_child();
+			if (ret != 0) {
+				pm_printf(ALPM_LOG_WARNING, _("sandboxing failed!\n"));
+			}
+		}
 
 		execvp(file, argv);
 
@@ -352,7 +584,7 @@ static int download_with_xfercommand(void *ctx, const char *url,
 			free(cmd);
 		}
 	}
-	retval = systemvp(argv[0], (char**)argv);
+	retval = systemvp(argv[0], (char**)argv, true);
 
 	if(retval == -1) {
 		pm_printf(ALPM_LOG_WARNING, _("running XferCommand: fork failed!\n"));
