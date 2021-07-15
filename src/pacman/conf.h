@@ -55,6 +55,7 @@ typedef struct __config_t {
 	unsigned short print;
 	unsigned short checkspace;
 	unsigned short usesyslog;
+	unsigned short usesandbox;
 	unsigned short color;
 	unsigned short disable_dl_timeout;
 	char *print_format;
@@ -67,6 +68,7 @@ typedef struct __config_t {
 	char *logfile;
 	char *gpgdir;
 	char *sysroot;
+	char *sandboxuser;
 	alpm_list_t *hookdirs;
 	alpm_list_t *cachedirs;
 	alpm_list_t *architectures;

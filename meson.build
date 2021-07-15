@@ -91,6 +91,10 @@ libarchive = dependency('libarchive',
                         version : '>=3.0.0',
                         static : get_option('buildstatic'))
 
+libcap = dependency('libcap',
+                    static : get_option('buildstatic'))
+conf.set('HAVE_LIBCAP', libcap.found())
+
 libcurl = dependency('libcurl',
                      version : '>=7.55.0',
                      required : get_option('curl'),
@@ -120,7 +124,12 @@ else
   error('unhandled crypto value @0@'.format(want_crypto))
 endif
 
+libseccomp = dependency('libseccomp',
+                        static : get_option('buildstatic'))
+conf.set('HAVE_LIBSECCOMP', libseccomp.found())
+
 foreach header : [
+    'linux/landlock.h',
     'mntent.h',
     'sys/mnttab.h',
     'sys/mount.h',
@@ -305,7 +314,7 @@ libcommon = static_library(
   gnu_symbol_visibility : 'hidden',
   install : false)
 
-alpm_deps = [crypto_provider, libarchive, libcurl, libintl, gpgme]
+alpm_deps = [crypto_provider, libarchive, libcap, libcurl, libintl, libseccomp, gpgme]
 
 libalpm_a = static_library(
   'alpm_objlib',

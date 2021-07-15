@@ -1837,6 +1837,11 @@ int alpm_option_set_gpgdir(alpm_handle_t *handle, const char *gpgdir);
 /* End of gpdir accessors */
 /** @} */
 
+/** Sets the user to switch to  for sensitive operations like downloading a file.
+ * @param handle the context handle
+ * @param sandboxuser the user to set
+ */
+int alpm_option_set_sandboxuser(alpm_handle_t *handle, const char *sandboxuser);
 
 /** @name Accessors for use syslog
  *
@@ -1859,6 +1864,11 @@ int alpm_option_set_usesyslog(alpm_handle_t *handle, int usesyslog);
 /* End of usesyslog accessors */
 /** @} */
 
+/** Sets whether to use sandboxing for sensitive operations like downloading a file (0 is FALSE, TRUE otherwise).
+ * @param handle the context handle
+ * @param usesandbox whether to use the sandboxing (0 is FALSE, TRUE otherwise)
+ */
+int alpm_option_set_usesandbox(alpm_handle_t *handle, int usesandbox);
 
 /** @name Accessors to the list of no-upgrade files.
  * These functions modify the list of files which should

@@ -33,6 +33,8 @@
 #include <unistd.h>
 #include <signal.h>
 
+#include <alpm_sandbox.h>
+
 /* pacman */
 #include "conf.h"
 #include "ini.h"
@@ -215,7 +217,7 @@ static char *get_tempfile(const char *path, const char *filename)
  * - not thread-safe
  * - errno may be set by fork(), pipe(), or execvp()
  */
-static int systemvp(const char *file, char *const argv[])
+static int systemvp(const char *file, char *const argv[], bool sandbox, const char *sandboxuser)
 {
 	int pid, err = 0, ret = -1, err_fd[2];
 	sigset_t oldblock;
@@ -241,6 +243,13 @@ static int systemvp(const char *file, char *const argv[])
 		sigaction(SIGINT, &oldint, NULL);
 		sigaction(SIGQUIT, &oldquit, NULL);
 		sigprocmask(SIG_SETMASK, &oldblock, NULL);
+
+		if (sandbox) {
+			ret = alpm_sandbox_child(sandboxuser);
+			if (ret != 0) {
+				pm_printf(ALPM_LOG_WARNING, _("sandboxing failed!\n"));
+			}
+		}
 
 		execvp(file, argv);
 
@@ -352,7 +361,7 @@ static int download_with_xfercommand(void *ctx, const char *url,
 			free(cmd);
 		}
 	}
-	retval = systemvp(argv[0], (char**)argv);
+	retval = systemvp(argv[0], (char**)argv, config->usesandbox, config->sandboxuser);
 
 	if(retval == -1) {
 		pm_printf(ALPM_LOG_WARNING, _("running XferCommand: fork failed!\n"));
@@ -601,6 +610,9 @@ static int _parse_options(const char *key, char *value,
 		if(strcmp(key, "UseSyslog") == 0) {
 			config->usesyslog = 1;
 			pm_printf(ALPM_LOG_DEBUG, "config: usesyslog\n");
+		} else if(strcmp(key, "UseSandbox") == 0) {
+			config->usesandbox = 1;
+			pm_printf(ALPM_LOG_DEBUG, "config: usesandbox\n");
 		} else if(strcmp(key, "ILoveCandy") == 0) {
 			config->chomp = 1;
 			pm_printf(ALPM_LOG_DEBUG, "config: chomp\n");
@@ -667,6 +679,11 @@ static int _parse_options(const char *key, char *value,
 			if(!config->logfile) {
 				config->logfile = strdup(value);
 				pm_printf(ALPM_LOG_DEBUG, "config: logfile: %s\n", value);
+			}
+		} else if(strcmp(key, "SandboxUser") == 0) {
+			if(!config->sandboxuser) {
+				config->sandboxuser = strdup(value);
+				pm_printf(ALPM_LOG_DEBUG, "config: sandboxuser: %s\n", value);
 			}
 		} else if(strcmp(key, "XferCommand") == 0) {
 			char **c;
@@ -904,6 +921,8 @@ static int setup_libalpm(void)
 	alpm_option_set_architectures(handle, config->architectures);
 	alpm_option_set_checkspace(handle, config->checkspace);
 	alpm_option_set_usesyslog(handle, config->usesyslog);
+	alpm_option_set_usesandbox(handle, config->usesandbox);
+	alpm_option_set_sandboxuser(handle, config->sandboxuser);
 
 	alpm_option_set_ignorepkgs(handle, config->ignorepkg);
 	alpm_option_set_ignoregroups(handle, config->ignoregrp);

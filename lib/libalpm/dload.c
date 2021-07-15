@@ -28,6 +28,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <signal.h>
 
 #ifdef HAVE_NETINET_IN_H
@@ -44,6 +45,7 @@
 /* libalpm */
 #include "dload.h"
 #include "alpm_list.h"
+#include "alpm_sandbox.h"
 #include "alpm.h"
 #include "log.h"
 #include "util.h"
@@ -898,6 +900,81 @@ static int curl_download_internal(alpm_handle_t *handle,
 
 #endif
 
+static int curl_download_internal_sandboxed(alpm_handle_t *handle,
+		alpm_list_t *payloads /* struct dload_payload */,
+		const char *localpath)
+{
+	int pid, err = 0, ret = -1, err_fd[2];
+	sigset_t oldblock;
+	struct sigaction sa_ign = { .sa_handler = SIG_IGN }, oldint, oldquit;
+
+	if(pipe(err_fd) != 0) {
+		return -1;
+	}
+
+	sigaction(SIGINT, &sa_ign, &oldint);
+	sigaction(SIGQUIT, &sa_ign, &oldquit);
+	sigaddset(&sa_ign.sa_mask, SIGCHLD);
+	sigprocmask(SIG_BLOCK, &sa_ign.sa_mask, &oldblock);
+
+	pid = fork();
+
+	/* child */
+	if(pid == 0) {
+		close(err_fd[0]);
+		fcntl(err_fd[1], F_SETFD, FD_CLOEXEC);
+
+		/* restore signal handling for the child to inherit */
+		sigaction(SIGINT, &oldint, NULL);
+		sigaction(SIGQUIT, &oldquit, NULL);
+		sigprocmask(SIG_SETMASK, &oldblock, NULL);
+
+		/* cwd to the download directory */
+		ret = chdir(localpath);
+		if(ret != 0) {
+			_alpm_log(handle, ALPM_LOG_WARNING, _("could not chdir to download directory %s\n"), localpath);
+			ret = -1;
+		} else {
+			ret = alpm_sandbox_child(handle->sandboxuser);
+			if (ret != 0) {
+				_alpm_log(handle, ALPM_LOG_WARNING, _("sandboxing failed!\n"));
+			}
+
+			ret = curl_download_internal(handle, payloads, localpath);
+		}
+
+		/* pass the result back to the parent */
+		while(write(err_fd[1], &ret, sizeof(ret)) == -1 && errno == EINTR);
+		_Exit(ret < 0 ? 1 : 0);
+	}
+
+	/* parent */
+	close(err_fd[1]);
+
+	if(pid != -1)  {
+		int wret;
+		while((wret = waitpid(pid, &ret, 0)) == -1 && errno == EINTR);
+		if(wret > 0) {
+			while(read(err_fd[0], &ret, sizeof(ret)) == -1 && errno == EINTR);
+		}
+	} else {
+		/* fork failed, make sure errno is preserved after cleanup */
+		err = errno;
+	}
+
+	close(err_fd[0]);
+
+	sigaction(SIGINT, &oldint, NULL);
+	sigaction(SIGQUIT, &oldquit, NULL);
+	sigprocmask(SIG_SETMASK, &oldblock, NULL);
+
+	if(err) {
+		errno = err;
+		ret = -1;
+	}
+	return ret;
+}
+
 /* Returns -1 if an error happened for a required file
  * Returns 0 if a payload was actually downloaded
  * Returns 1 if no files were downloaded and all errors were non-fatal
@@ -908,7 +985,11 @@ int _alpm_download(alpm_handle_t *handle,
 {
 	if(handle->fetchcb == NULL) {
 #ifdef HAVE_LIBCURL
-		return curl_download_internal(handle, payloads, localpath);
+		if(handle->usesandbox) {
+			return curl_download_internal_sandboxed(handle, payloads, localpath);
+		} else {
+			return curl_download_internal(handle, payloads, localpath);
+		}
 #else
 		RET_ERR(handle, ALPM_ERR_EXTERNAL_DOWNLOAD, -1);
 #endif

@@ -90,6 +90,7 @@ struct __alpm_handle_t {
 	char *logfile;           /* Name of the log file */
 	char *lockfile;          /* Name of the lock file */
 	char *gpgdir;            /* Directory where GnuPG files are stored */
+	char *sandboxuser;       /* User to switch to for sensitive operations like downloading files */
 	alpm_list_t *cachedirs;  /* Paths to pacman cache directories */
 	alpm_list_t *hookdirs;   /* Paths to hook directories */
 	alpm_list_t *overwrite_files; /* Paths that may be overwritten */
@@ -104,6 +105,7 @@ struct __alpm_handle_t {
 	/* options */
 	alpm_list_t *architectures; /* Architectures of packages we should allow */
 	int usesyslog;           /* Use syslog instead of logfile? */ /* TODO move to frontend */
+	int usesandbox;          /* Whether to enable sandboxing for sensitive operations like downloading files */
 	int checkspace;          /* Check disk space before installing */
 	char *dbext;             /* Sync DB extension */
 	int siglevel;            /* Default signature verification level */

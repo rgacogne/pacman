@@ -2,6 +2,7 @@ libalpm_sources = files('''
   add.h add.c
   alpm.h alpm.c
   alpm_list.h alpm_list.c
+  alpm_sandbox.h alpm_sandbox.c
   backup.h backup.c
   base64.h base64.c
   be_local.c
