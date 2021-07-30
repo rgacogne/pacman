@@ -256,8 +256,14 @@ static inline int landlock_restrict_self(const int ruleset_fd, const __u32 flags
   LANDLOCK_ACCESS_FS_READ_FILE | \
   LANDLOCK_ACCESS_FS_READ_DIR)
 
-void sandbox_write_only_beneath_cwd(void)
+static int sandbox_write_only_beneath_cwd(void)
 {
+/*  const struct landlock_ruleset_attr ruleset_attr = {
+    .handled_access_fs = \
+      _LANDLOCK_ACCESS_FS_READ | \
+      _LANDLOCK_ACCESS_FS_WRITE | \
+      LANDLOCK_ACCESS_FS_EXECUTE,
+      };*/
   const struct landlock_ruleset_attr ruleset_attr = {
     .handled_access_fs = \
       _LANDLOCK_ACCESS_FS_READ | \
@@ -267,26 +273,47 @@ void sandbox_write_only_beneath_cwd(void)
   struct landlock_path_beneath_attr path_beneath = {
     .allowed_access = _LANDLOCK_ACCESS_FS_WRITE,
   };
+  int result = 0;
   int ruleset_fd;
 
   ruleset_fd = landlock_create_ruleset(&ruleset_attr, sizeof(ruleset_attr), 0);
-  if(ruleset_fd < 0) {
-    return;
+  if (ruleset_fd < 0) {
+    perror("landlock_create_ruleset");
+    return ruleset_fd;
   }
 
-  path_beneath.parent_fd = open(".", O_PATH | O_CLOEXEC | O_DIRECTORY);
+  /* allow / as read-only */
+  path_beneath.parent_fd = open("/", O_PATH | O_CLOEXEC | O_DIRECTORY);
+  path_beneath.allowed_access = _LANDLOCK_ACCESS_FS_READ | LANDLOCK_ACCESS_FS_EXECUTE;
 
-  if(!landlock_add_rule(ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &path_beneath, 0)) {
-    prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-    if(landlock_restrict_self(ruleset_fd, 0)) {
-      perror ("landlock_restrict_self");
-    }
-  } else {
-    perror ("landlock_add_rule");
+  if(landlock_add_rule(ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &path_beneath, 0)) {
+    perror("landlock_add_rule");
+    result = errno;
   }
 
   close(path_beneath.parent_fd);
+
+  if(result == 0) {
+    /* allow the current working directory as read-write */
+    path_beneath.parent_fd = open(".", O_PATH | O_CLOEXEC | O_DIRECTORY);
+    path_beneath.allowed_access = _LANDLOCK_ACCESS_FS_READ | _LANDLOCK_ACCESS_FS_WRITE | LANDLOCK_ACCESS_FS_EXECUTE;
+
+    if(!landlock_add_rule(ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &path_beneath, 0)) {
+      prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+      if (landlock_restrict_self(ruleset_fd, 0)) {
+        perror("landlock_restrict_self");
+        result = errno;
+      }
+    } else {
+      perror("landlock_add_rule");
+      result = errno;
+    }
+
+    close(path_beneath.parent_fd);
+  }
+
   close(ruleset_fd);
+  return result;
 }
 #endif /* HAVE_LINUX_LANDLOCK_H */
 
