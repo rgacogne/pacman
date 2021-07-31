@@ -268,6 +268,7 @@ static void dump_config(void)
 	show_bool("DisableDownloadTimeout", config->disable_dl_timeout);
 	show_bool("ILoveCandy", config->chomp);
 	show_bool("NoProgressBar", config->noprogressbar);
+	show_bool("UseSandbox", config->usesandbox);
 
 	show_int("ParallelDownloads", config->parallel_downloads);
 
@@ -369,6 +370,8 @@ static int list_directives(void)
 
 		} else if(strcasecmp(i->data, "UseSyslog") == 0) {
 			show_bool("UseSyslog", config->usesyslog);
+		} else if(strcasecmp(i->data, "UseSandbox") == 0) {
+			show_bool("UseSandbox", config->usesandbox);
 		} else if(strcasecmp(i->data, "Color") == 0) {
 			show_bool("Color", config->color);
 		} else if(strcasecmp(i->data, "CheckSpace") == 0) {

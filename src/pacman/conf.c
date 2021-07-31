@@ -217,26 +217,25 @@ static char *get_tempfile(const char *path, const char *filename)
 # include <sys/syscall.h>
 #ifndef landlock_create_ruleset
 static inline int landlock_create_ruleset(const struct landlock_ruleset_attr *const attr,
-                       const size_t size, const __u32 flags)
+		const size_t size, const __u32 flags)
 {
-       return syscall(__NR_landlock_create_ruleset, attr, size, flags);
+	return syscall(__NR_landlock_create_ruleset, attr, size, flags);
 }
 #endif
 
 #ifndef landlock_add_rule
 static inline int landlock_add_rule(const int ruleset_fd,
-                 const enum landlock_rule_type rule_type,
-                 const void *const rule_attr, const __u32 flags)
+		const enum landlock_rule_type rule_type,
+		const void *const rule_attr, const __u32 flags)
 {
-       return syscall(__NR_landlock_add_rule, ruleset_fd, rule_type,
-                       rule_attr, flags);
+	return syscall(__NR_landlock_add_rule, ruleset_fd, rule_type, rule_attr, flags);
 }
 #endif
 
 #ifndef landlock_restrict_self
 static inline int landlock_restrict_self(const int ruleset_fd, const __u32 flags)
 {
-       return syscall(__NR_landlock_restrict_self, ruleset_fd, flags);
+	return syscall(__NR_landlock_restrict_self, ruleset_fd, flags);
 }
 #endif
 
@@ -258,62 +257,56 @@ static inline int landlock_restrict_self(const int ruleset_fd, const __u32 flags
 
 static int sandbox_write_only_beneath_cwd(void)
 {
-/*  const struct landlock_ruleset_attr ruleset_attr = {
-    .handled_access_fs = \
-      _LANDLOCK_ACCESS_FS_READ | \
-      _LANDLOCK_ACCESS_FS_WRITE | \
-      LANDLOCK_ACCESS_FS_EXECUTE,
-      };*/
-  const struct landlock_ruleset_attr ruleset_attr = {
-    .handled_access_fs = \
-      _LANDLOCK_ACCESS_FS_READ | \
-      _LANDLOCK_ACCESS_FS_WRITE | \
-      LANDLOCK_ACCESS_FS_EXECUTE,
-  };
-  struct landlock_path_beneath_attr path_beneath = {
-    .allowed_access = _LANDLOCK_ACCESS_FS_WRITE,
-  };
-  int result = 0;
-  int ruleset_fd;
+	const struct landlock_ruleset_attr ruleset_attr = {
+		.handled_access_fs = \
+			_LANDLOCK_ACCESS_FS_READ | \
+			_LANDLOCK_ACCESS_FS_WRITE | \
+			LANDLOCK_ACCESS_FS_EXECUTE,
+	};
+	struct landlock_path_beneath_attr path_beneath = {
+		.allowed_access = _LANDLOCK_ACCESS_FS_WRITE,
+	};
+	int result = 0;
+	int ruleset_fd;
 
-  ruleset_fd = landlock_create_ruleset(&ruleset_attr, sizeof(ruleset_attr), 0);
-  if (ruleset_fd < 0) {
-    perror("landlock_create_ruleset");
-    return ruleset_fd;
-  }
+	ruleset_fd = landlock_create_ruleset(&ruleset_attr, sizeof(ruleset_attr), 0);
+	if(ruleset_fd < 0) {
+		perror("landlock_create_ruleset");
+		return ruleset_fd;
+	}
 
-  /* allow / as read-only */
-  path_beneath.parent_fd = open("/", O_PATH | O_CLOEXEC | O_DIRECTORY);
-  path_beneath.allowed_access = _LANDLOCK_ACCESS_FS_READ | LANDLOCK_ACCESS_FS_EXECUTE;
+	/* allow / as read-only */
+	path_beneath.parent_fd = open("/", O_PATH | O_CLOEXEC | O_DIRECTORY);
+	path_beneath.allowed_access = _LANDLOCK_ACCESS_FS_READ | LANDLOCK_ACCESS_FS_EXECUTE;
 
-  if(landlock_add_rule(ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &path_beneath, 0)) {
-    perror("landlock_add_rule");
-    result = errno;
-  }
+	if(landlock_add_rule(ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &path_beneath, 0)) {
+		perror("landlock_add_rule");
+		result = errno;
+	}
 
-  close(path_beneath.parent_fd);
+	close(path_beneath.parent_fd);
 
-  if(result == 0) {
-    /* allow the current working directory as read-write */
-    path_beneath.parent_fd = open(".", O_PATH | O_CLOEXEC | O_DIRECTORY);
-    path_beneath.allowed_access = _LANDLOCK_ACCESS_FS_READ | _LANDLOCK_ACCESS_FS_WRITE | LANDLOCK_ACCESS_FS_EXECUTE;
+	if(result == 0) {
+		/* allow the current working directory as read-write */
+		path_beneath.parent_fd = open(".", O_PATH | O_CLOEXEC | O_DIRECTORY);
+		path_beneath.allowed_access = _LANDLOCK_ACCESS_FS_READ | _LANDLOCK_ACCESS_FS_WRITE | LANDLOCK_ACCESS_FS_EXECUTE;
 
-    if(!landlock_add_rule(ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &path_beneath, 0)) {
-      prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-      if (landlock_restrict_self(ruleset_fd, 0)) {
-        perror("landlock_restrict_self");
-        result = errno;
-      }
-    } else {
-      perror("landlock_add_rule");
-      result = errno;
-    }
+		if(!landlock_add_rule(ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &path_beneath, 0)) {
+			prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+			if(landlock_restrict_self(ruleset_fd, 0)) {
+				perror("landlock_restrict_self");
+				result = errno;
+			}
+		} else {
+			perror("landlock_add_rule");
+			result = errno;
+		}
 
-    close(path_beneath.parent_fd);
-  }
+		close(path_beneath.parent_fd);
+	}
 
-  close(ruleset_fd);
-  return result;
+	close(ruleset_fd);
+	return result;
 }
 #endif /* HAVE_LINUX_LANDLOCK_H */
 
@@ -420,7 +413,7 @@ static int sandbox_filter_syscalls(void)
 		return errno;
 	}
 
-	for (idx = 0; idx < sizeof(denied_syscalls) / sizeof(*denied_syscalls); idx++) {
+	for(idx = 0; idx < sizeof(denied_syscalls) / sizeof(*denied_syscalls); idx++) {
 		int syscall = seccomp_syscall_resolve_name(denied_syscalls[idx]);
 		if(syscall != __NR_SCMP_ERROR) {
 			if(seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), syscall, 0) != 0) {
@@ -611,7 +604,7 @@ static int download_with_xfercommand(void *ctx, const char *url,
 			free(cmd);
 		}
 	}
-	retval = systemvp(argv[0], (char**)argv, true);
+	retval = systemvp(argv[0], (char**)argv, config->usesandbox);
 
 	if(retval == -1) {
 		pm_printf(ALPM_LOG_WARNING, _("running XferCommand: fork failed!\n"));
@@ -860,6 +853,9 @@ static int _parse_options(const char *key, char *value,
 		if(strcmp(key, "UseSyslog") == 0) {
 			config->usesyslog = 1;
 			pm_printf(ALPM_LOG_DEBUG, "config: usesyslog\n");
+		} else if(strcmp(key, "UseSandbox") == 0) {
+			config->usesandbox = 1;
+			pm_printf(ALPM_LOG_DEBUG, "config: usesandbox\n");
 		} else if(strcmp(key, "ILoveCandy") == 0) {
 			config->chomp = 1;
 			pm_printf(ALPM_LOG_DEBUG, "config: chomp\n");
