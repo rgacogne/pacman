@@ -104,6 +104,7 @@ struct __alpm_handle_t {
 	/* options */
 	alpm_list_t *architectures; /* Architectures of packages we should allow */
 	int usesyslog;           /* Use syslog instead of logfile? */ /* TODO move to frontend */
+	int usesandbox;          /* Whether to enable sandboxing for sensitive operations like downloading files */
 	int checkspace;          /* Check disk space before installing */
 	char *dbext;             /* Sync DB extension */
 	int siglevel;            /* Default signature verification level */

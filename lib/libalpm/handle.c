@@ -580,6 +580,13 @@ int SYMEXPORT alpm_option_set_usesyslog(alpm_handle_t *handle, int usesyslog)
 	return 0;
 }
 
+int SYMEXPORT alpm_option_set_usesandbox(alpm_handle_t *handle, int usesandbox)
+{
+	CHECK_HANDLE(handle, return -1);
+	handle->usesandbox = usesandbox;
+	return 0;
+}
+
 static int _alpm_option_strlist_add(alpm_handle_t *handle, alpm_list_t **list, const char *str)
 {
 	char *dup;

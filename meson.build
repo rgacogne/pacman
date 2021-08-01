@@ -314,7 +314,7 @@ libcommon = static_library(
   gnu_symbol_visibility : 'hidden',
   install : false)
 
-alpm_deps = [crypto_provider, libarchive, libcurl, libintl, gpgme]
+alpm_deps = [crypto_provider, libarchive, libcap, libcurl, libintl, libseccomp, gpgme]
 
 libalpm_a = static_library(
   'alpm_objlib',
@@ -350,7 +350,7 @@ pacman_bin = executable(
   pacman_sources,
   include_directories : includes,
   link_with : [libalpm, libcommon],
-  dependencies : [libarchive, libcap, libseccomp],
+  dependencies : [libarchive],
   install : true,
 )
 
@@ -359,7 +359,7 @@ executable(
   pacman_conf_sources,
   include_directories : includes,
   link_with : [libalpm, libcommon],
-  dependencies : [libarchive, libcap, libseccomp],
+  dependencies : [libarchive],
   install : true,
 )
 

@@ -1859,6 +1859,13 @@ int alpm_option_set_usesyslog(alpm_handle_t *handle, int usesyslog);
 /* End of usesyslog accessors */
 /** @} */
 
+/** Sets whether to use sandboxing for sensitive operations like downloading a file (0 is FALSE, TRUE otherwise).
+ * @param handle the context handle
+ * @param usesandbox whether to use the sandboxing (0 is FALSE, TRUE otherwise)
+ */
+int alpm_option_set_usesandbox(alpm_handle_t *handle, int usesandbox);
+/* End of usesandbox accessors */
+/** @} */
 
 /** @name Accessors to the list of no-upgrade files.
  * These functions modify the list of files which should
