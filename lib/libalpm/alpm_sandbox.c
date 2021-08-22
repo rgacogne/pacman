@@ -19,8 +19,11 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
+#include <pwd.h>
 #include <sys/capability.h>
 #include <sys/syscall.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #ifdef HAVE_LINUX_LANDLOCK_H
@@ -247,10 +250,32 @@ static int sandbox_filter_syscalls(void)
 }
 #endif /* HAVE_LIBSECCOMP */
 
+static int switch_to_user(const char *user)
+{
+	struct passwd const *pw = NULL;
+	if(getuid() != 0) {
+		return 1;
+	}
+	pw = getpwnam(user);
+	if(pw == NULL) {
+		return errno;
+	}
+	if(setgid(pw->pw_gid) != 0) {
+    return errno;
+	}
+	if(setgroups(0, NULL)) {
+		return errno;
+	}
+	if(setuid(pw->pw_uid) != 0) {
+		return errno;
+	}
+	return 0;
+}
+
 /* check exported library symbols with: nm -C -D <lib> */
 #define SYMEXPORT __attribute__((visibility("default")))
 
-int SYMEXPORT alpm_sandbox_child(void)
+int SYMEXPORT alpm_sandbox_child(const char* sandboxuser)
 {
 	int result = 0;
 #ifdef HAVE_LINUX_LANDLOCK_H
@@ -261,7 +286,13 @@ int SYMEXPORT alpm_sandbox_child(void)
 	result = sandbox_filter_syscalls();
 #endif /* HAVE_LIBSECCOMP */
 
+	if(sandboxuser != NULL) {
+		result = switch_to_user(sandboxuser);
+	}
+
 #ifdef HAVE_LIBCAP
+	/* we might have some capabilities remaining,
+	 * especially if sandboxuser is not set */
 	cap_t caps = cap_get_proc();
 	cap_clear(caps);
 	if(cap_set_mode(CAP_MODE_NOPRIV) != 0) {
@@ -285,5 +316,6 @@ int SYMEXPORT alpm_sandbox_child(void)
 		result = ret;
 	}
 #endif /* HAVE_LINUX_LANDLOCK_H */
+
 	return result;
 }

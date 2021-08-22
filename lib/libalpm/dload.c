@@ -935,7 +935,7 @@ static int curl_download_internal_sandboxed(alpm_handle_t *handle,
 			_alpm_log(handle, ALPM_LOG_WARNING, _("could not chdir to download directory %s\n"), localpath);
 			ret = -1;
 		} else {
-			ret = alpm_sandbox_child();
+			ret = alpm_sandbox_child(handle->sandboxuser);
 			if (ret != 0) {
 				_alpm_log(handle, ALPM_LOG_WARNING, _("sandboxing failed!\n"));
 			}

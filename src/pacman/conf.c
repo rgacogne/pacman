@@ -217,7 +217,7 @@ static char *get_tempfile(const char *path, const char *filename)
  * - not thread-safe
  * - errno may be set by fork(), pipe(), or execvp()
  */
-static int systemvp(const char *file, char *const argv[], bool sandbox)
+static int systemvp(const char *file, char *const argv[], bool sandbox, const char *sandboxuser)
 {
 	int pid, err = 0, ret = -1, err_fd[2];
 	sigset_t oldblock;
@@ -245,7 +245,7 @@ static int systemvp(const char *file, char *const argv[], bool sandbox)
 		sigprocmask(SIG_SETMASK, &oldblock, NULL);
 
 		if (sandbox) {
-			ret = alpm_sandbox_child();
+			ret = alpm_sandbox_child(sandboxuser);
 			if (ret != 0) {
 				pm_printf(ALPM_LOG_WARNING, _("sandboxing failed!\n"));
 			}
@@ -361,7 +361,7 @@ static int download_with_xfercommand(void *ctx, const char *url,
 			free(cmd);
 		}
 	}
-	retval = systemvp(argv[0], (char**)argv, config->usesandbox);
+	retval = systemvp(argv[0], (char**)argv, config->usesandbox, config->sandboxuser);
 
 	if(retval == -1) {
 		pm_printf(ALPM_LOG_WARNING, _("running XferCommand: fork failed!\n"));
@@ -680,6 +680,11 @@ static int _parse_options(const char *key, char *value,
 				config->logfile = strdup(value);
 				pm_printf(ALPM_LOG_DEBUG, "config: logfile: %s\n", value);
 			}
+		} else if(strcmp(key, "SandboxUser") == 0) {
+			if(!config->sandboxuser) {
+				config->sandboxuser = strdup(value);
+				pm_printf(ALPM_LOG_DEBUG, "config: sandboxuser: %s\n", value);
+			}
 		} else if(strcmp(key, "XferCommand") == 0) {
 			char **c;
 			if((config->xfercommand_argv = wordsplit(value)) == NULL) {
@@ -917,6 +922,7 @@ static int setup_libalpm(void)
 	alpm_option_set_checkspace(handle, config->checkspace);
 	alpm_option_set_usesyslog(handle, config->usesyslog);
 	alpm_option_set_usesandbox(handle, config->usesandbox);
+	alpm_option_set_sandboxuser(handle, config->sandboxuser);
 
 	alpm_option_set_ignorepkgs(handle, config->ignorepkg);
 	alpm_option_set_ignoregroups(handle, config->ignoregrp);

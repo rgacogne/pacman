@@ -573,6 +573,19 @@ int SYMEXPORT alpm_option_set_gpgdir(alpm_handle_t *handle, const char *gpgdir)
 	return 0;
 }
 
+int SYMEXPORT alpm_option_set_sandboxuser(alpm_handle_t *handle, const char *sandboxuser)
+{
+	CHECK_HANDLE(handle, return -1);
+	if(handle->sandboxuser) {
+		FREE(handle->sandboxuser);
+	}
+
+	STRDUP(handle->sandboxuser, sandboxuser, RET_ERR(handle, ALPM_ERR_MEMORY, -1));
+
+	_alpm_log(handle, ALPM_LOG_DEBUG, "option 'sandboxuser' = %s\n", handle->sandboxuser);
+	return 0;
+}
+
 int SYMEXPORT alpm_option_set_usesyslog(alpm_handle_t *handle, int usesyslog)
 {
 	CHECK_HANDLE(handle, return -1);

@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-int alpm_sandbox_child(void);
+int alpm_sandbox_child(const char *sandboxuser);
 
 #ifdef __cplusplus
 }
