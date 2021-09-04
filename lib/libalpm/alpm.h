@@ -1833,6 +1833,17 @@ int alpm_option_set_gpgdir(alpm_handle_t *handle, const char *gpgdir);
 /* End of gpdir accessors */
 /** @} */
 
+/** Returns the user to switch to for sensitive operations like downloading a file.
+ * @param handle the context handle
+ * @return the user name
+ */
+const char *alpm_option_get_sandboxuser(alpm_handle_t *handle);
+
+/** Sets the user to switch to for sensitive operations like downloading a file.
+ * @param handle the context handle
+ * @param sandboxuser the user to set
+ */
+int alpm_option_set_sandboxuser(alpm_handle_t *handle, const char *sandboxuser);
 
 /** @name Accessors for use syslog
  *
@@ -2880,6 +2891,12 @@ const char *alpm_version(void);
  * @return a bitmask of the capabilities
  * */
 int alpm_capabilities(void);
+
+/** Drop privileges by switching to a different user.
+ * @param sandboxuser the user to switch to
+ * @return 0 on success, the value of errno otherwise
+ */
+int alpm_sandbox_child(const char *sandboxuser);
 
 /* End of libalpm_misc */
 /** @} */
