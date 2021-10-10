@@ -270,6 +270,12 @@ const char SYMEXPORT *alpm_option_get_gpgdir(alpm_handle_t *handle)
 	return handle->gpgdir;
 }
 
+const char SYMEXPORT *alpm_option_get_sandboxuser(alpm_handle_t *handle)
+{
+	CHECK_HANDLE(handle, return NULL);
+	return handle->sandboxuser;
+}
+
 int SYMEXPORT alpm_option_get_usesyslog(alpm_handle_t *handle)
 {
 	CHECK_HANDLE(handle, return -1);
@@ -570,6 +576,19 @@ int SYMEXPORT alpm_option_set_gpgdir(alpm_handle_t *handle, const char *gpgdir)
 		RET_ERR(handle, err, -1);
 	}
 	_alpm_log(handle, ALPM_LOG_DEBUG, "option 'gpgdir' = %s\n", handle->gpgdir);
+	return 0;
+}
+
+int SYMEXPORT alpm_option_set_sandboxuser(alpm_handle_t *handle, const char *sandboxuser)
+{
+	CHECK_HANDLE(handle, return -1);
+	if(handle->sandboxuser) {
+		FREE(handle->sandboxuser);
+	}
+
+	STRDUP(handle->sandboxuser, sandboxuser, RET_ERR(handle, ALPM_ERR_MEMORY, -1));
+
+	_alpm_log(handle, ALPM_LOG_DEBUG, "option 'sandboxuser' = %s\n", handle->sandboxuser);
 	return 0;
 }
 
