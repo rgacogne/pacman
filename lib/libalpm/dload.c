@@ -1012,11 +1012,12 @@ static int curl_download_internal_sandboxed(alpm_handle_t *handle,
 					if(ret & 128) {
 						/* an error happened for a required file, or unexpected exit status */
 						handle->pm_errno = ret & ~128;
+						ret = -1;
 					}
 					else {
 						handle->pm_errno = ret;
+						ret = 1;
 					}
-					ret = -1;
 				}
 			}
 		}
