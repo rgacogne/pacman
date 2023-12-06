@@ -940,13 +940,14 @@ static int curl_download_internal_sandboxed(alpm_handle_t *handle,
 		/* cwd to the download directory */
 		ret = chdir(localpath);
 		if(ret != 0) {
+			handle->pm_errno = errno;
 			_alpm_log(handle, ALPM_LOG_ERROR, _("could not chdir to download directory %s\n"), localpath);
 			ret = -1;
 		} else {
 			ret = alpm_sandbox_setup_child(handle->sandboxuser);
 			if (ret != 0) {
 				_alpm_log(handle, ALPM_LOG_ERROR, _("switching to sandbox user '%s' failed!\n"), handle->sandboxuser);
-				_Exit(ret);
+				_Exit(ret | 128);
 			}
 
 			ret = curl_download_internal(handle, payloads);
