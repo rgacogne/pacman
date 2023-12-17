@@ -31,9 +31,11 @@
 #include <limits.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <poll.h>
+#include <pwd.h>
 #include <signal.h>
 
 /* libarchive */
@@ -943,6 +945,43 @@ const char *_alpm_filecache_setup(alpm_handle_t *handle)
 	_alpm_log(handle, ALPM_LOG_WARNING,
 			_("couldn't find or create package cache, using %s instead\n"), cachedir);
 	return cachedir;
+}
+
+/** Create a temporary directory under the supplied directory.
+ * The new directory is writable by the download user, and will be
+ * removed after the download operation has completed.
+ * @param dir existing sync or cache directory
+ * @param user download user name
+ * @return pointer to a sub-directory writable by the download user inside the existing directory.
+ */
+char *_alpm_temporary_download_dir_setup(const char *dir, const char *user)
+{
+	struct passwd const *pw = NULL;
+
+	ASSERT(dir != NULL, return NULL);
+	if(user != NULL) {
+		ASSERT((pw = getpwnam(user)) != NULL, return NULL);
+	}
+
+	const char template[] = "download-XXXXXX";
+	size_t newdirlen = strlen(dir) + sizeof(template) + 1;
+	char *newdir = NULL;
+	MALLOC(newdir, newdirlen, return NULL);
+	snprintf(newdir, newdirlen - 1, "%s%s", dir, template);
+	newdir = mkdtemp(newdir);
+	if(newdir == NULL) {
+		free(newdir);
+		return NULL;
+	}
+	if(pw != NULL) {
+		if(chown(newdir, pw->pw_uid, pw->pw_gid) == -1) {
+			free(newdir);
+			return NULL;
+		}
+	}
+	newdir[newdirlen-2] = '/';
+	newdir[newdirlen-1] = 0;
+	return newdir;
 }
 
 #if defined  HAVE_LIBSSL || defined HAVE_LIBNETTLE

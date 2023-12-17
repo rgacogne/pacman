@@ -30,6 +30,8 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <dirent.h>
+#include <pwd.h>
 
 #ifdef HAVE_NETINET_IN_H
 #include <netinet/in.h> /* IPPROTO_TCP */
@@ -69,6 +71,47 @@ static mode_t _getumask(void)
 	mode_t mask = umask(0);
 	umask(mask);
 	return mask;
+}
+
+static int finalize_download_file(const char *filename)
+{
+	struct stat st;
+	ASSERT(filename != NULL, return -1);
+	ASSERT(stat(filename, &st) == 0, return -1);
+	if(st.st_size == 0) {
+		unlink(filename);
+                return 1;
+	}
+	ASSERT(chown(filename, 0, 0) != -1, return -1);
+	ASSERT(chmod(filename, 0600) != -1, return -1);
+	return 0;
+}
+
+void _alpm_remove_temporary_download_dir(const char *dir)
+{
+	ASSERT(dir != NULL, return);
+	size_t dirlen = strlen(dir);
+	struct dirent *dp = NULL;
+	DIR *dirp = opendir(dir);
+	if(!dirp) {
+		return;
+	}
+	for(dp = readdir(dirp); dp != NULL; dp = readdir(dirp)) {
+		if(strcmp(dp->d_name, "..") != 0 && strcmp(dp->d_name, ".") != 0) {
+			char name[PATH_MAX];
+			if(dirlen + strlen(dp->d_name) + 2 > PATH_MAX) {
+				/* file path is too long to remove, hmm. */
+				continue;
+			} else {
+				sprintf(name, "%s/%s", dir, dp->d_name);
+				if(unlink(name)) {
+					continue;
+				}
+			}
+		}
+	}
+	closedir(dirp);
+	rmdir(dir);
 }
 
 static FILE *create_tempfile(struct dload_payload *payload, const char *localpath)
@@ -1060,20 +1103,85 @@ static int payload_download_fetchcb(struct dload_payload *payload,
 	return ret;
 }
 
+static int move_downloaded_file_from_temporary_cachedir(const char *temporary_filename,
+		const char *local_path,
+		size_t local_path_len)
+{
+	ASSERT(temporary_filename != NULL, return -1);
+	ASSERT(local_path != NULL, return -1);
+	int ret = finalize_download_file(temporary_filename);
+	if(ret != 0) {
+		return ret;
+	}
+	char *filename = basename(temporary_filename);
+	char *dest = NULL;
+	size_t destlen = local_path_len + 1 + strlen(filename) + 1;
+	MALLOC(dest, destlen, FREE(filename); return -1);
+	snprintf(dest, destlen, "%s/%s", local_path, filename);
+	if(rename(temporary_filename, dest)) {
+		FREE(dest);
+		FREE(filename);
+		return -1;
+	}
+	FREE(dest);
+	return 0;
+}
+
+static int move_downloaded_sig_file_from_temporary_cachedir(const char *temporary_filename,
+		const char *local_path,
+		size_t local_path_len)
+{
+	ASSERT(temporary_filename != NULL, return -1);
+	ASSERT(local_path != NULL, return -1);
+	const char sig_suffix[] = ".sig";
+	char *sig_filename = NULL;
+	size_t sig_filename_len = strlen(temporary_filename) + sizeof(sig_suffix);
+	MALLOC(sig_filename, sig_filename_len, return -1);
+	snprintf(sig_filename, sig_filename_len, "%s%s", temporary_filename, sig_suffix);
+	int ret = move_downloaded_file_from_temporary_cachedir(sig_filename, local_path, local_path_len);
+	FREE(sig_filename);
+	return ret;
+}
+
+static int move_downloaded_files_from_temporary_cachedir(alpm_list_t *payloads,
+		const char *localpath)
+{
+	ASSERT(payloads != NULL, return -1);
+	ASSERT(localpath != NULL, return -1);
+	alpm_list_t *p;
+	size_t localpathlen = strlen(localpath);
+	for(p = payloads; p; p = p->next) {
+		struct dload_payload *payload = p->data;
+		if(payload->destfile_name) {
+			int ret = move_downloaded_file_from_temporary_cachedir(payload->destfile_name, localpath, localpathlen);
+
+			if(ret == -1) {
+				return -1;
+			}
+		}
+		if (payload->download_signature) {
+			move_downloaded_sig_file_from_temporary_cachedir(payload->destfile_name, localpath, localpathlen);
+		}
+	}
+	return 0;
+}
+
 /* Returns -1 if an error happened for a required file
  * Returns 0 if a payload was actually downloaded
  * Returns 1 if no files were downloaded and all errors were non-fatal
  */
 int _alpm_download(alpm_handle_t *handle,
 		alpm_list_t *payloads /* struct dload_payload */,
-		const char *localpath)
+		const char *localpath,
+		const char *temporary_localpath)
 {
+	int ret;
 	if(handle->fetchcb == NULL) {
 #ifdef HAVE_LIBCURL
 		if(handle->sandboxuser) {
-			return curl_download_internal_sandboxed(handle, payloads, localpath);
+			ret = curl_download_internal_sandboxed(handle, payloads, temporary_localpath);
 		} else {
-			return curl_download_internal(handle, payloads);
+			ret = curl_download_internal(handle, payloads);
 		}
 #else
 		RET_ERR(handle, ALPM_ERR_EXTERNAL_DOWNLOAD, -1);
@@ -1084,16 +1192,16 @@ int _alpm_download(alpm_handle_t *handle,
 		for(p = payloads; p; p = p->next) {
 			struct dload_payload *payload = p->data;
 			alpm_list_t *s;
-			int ret = -1;
+			ret = -1;
 
 			if(payload->fileurl) {
-				ret = handle->fetchcb(handle->fetchcb_ctx, payload->fileurl, localpath, payload->force);
+				ret = handle->fetchcb(handle->fetchcb_ctx, payload->fileurl, temporary_localpath, payload->force);
 			} else {
 				for(s = payload->cache_servers; s && ret == -1; s = s->next) {
-					ret = payload_download_fetchcb(payload, s->data, localpath);
+					ret = payload_download_fetchcb(payload, s->data, temporary_localpath);
 				}
 				for(s = payload->servers; s && ret == -1; s = s->next) {
-					ret = payload_download_fetchcb(payload, s->data, localpath);
+					ret = payload_download_fetchcb(payload, s->data, temporary_localpath);
 				}
 			}
 
@@ -1103,8 +1211,13 @@ int _alpm_download(alpm_handle_t *handle,
 				updated = 1;
 			}
 		}
-		return updated ? 0 : 1;
+		ret = updated ? 0 : 1;
 	}
+
+	if (move_downloaded_files_from_temporary_cachedir(payloads, localpath)) {
+		return -1;
+	}
+	return ret;
 }
 
 static char *filecache_find_url(alpm_handle_t *handle, const char *url)
@@ -1127,6 +1240,7 @@ int SYMEXPORT alpm_fetch_pkgurl(alpm_handle_t *handle, const alpm_list_t *urls,
 	  alpm_list_t **fetched)
 {
 	const char *cachedir;
+	char *temporary_cachedir = NULL;
 	alpm_list_t *payloads = NULL;
 	const alpm_list_t *i;
 	alpm_event_t event = {0};
@@ -1136,6 +1250,8 @@ int SYMEXPORT alpm_fetch_pkgurl(alpm_handle_t *handle, const alpm_list_t *urls,
 
 	/* find a valid cache dir to download to */
 	cachedir = _alpm_filecache_setup(handle);
+	temporary_cachedir = _alpm_temporary_download_dir_setup(cachedir, handle->sandboxuser);
+	ASSERT(temporary_cachedir != NULL, return -1);
 
 	for(i = urls; i; i = i->next) {
 		char *url = i->data;
@@ -1159,8 +1275,8 @@ int SYMEXPORT alpm_fetch_pkgurl(alpm_handle_t *handle, const alpm_list_t *urls,
 			c = strrchr(url, '/');
 			if(payload->remote_name && strlen(payload->remote_name) > 0 && strstr(c, ".pkg")) {
 				/* we probably have a usable package filename to download to */
-				payload->destfile_name = _alpm_get_fullpath(cachedir, payload->remote_name, "");
-				payload->tempfile_name = _alpm_get_fullpath(cachedir, payload->remote_name, ".part");
+				payload->destfile_name = _alpm_get_fullpath(temporary_cachedir, payload->remote_name, "");
+				payload->tempfile_name = _alpm_get_fullpath(temporary_cachedir, payload->remote_name, ".part");
 				payload->allow_resume = 1;
 
 				if(!payload->destfile_name || !payload->tempfile_name) {
@@ -1174,7 +1290,7 @@ int SYMEXPORT alpm_fetch_pkgurl(alpm_handle_t *handle, const alpm_list_t *urls,
 				payload->unlink_on_fail = 1;
 
 				payload->tempfile_openmode = "wb";
-				payload->localf = create_tempfile(payload, cachedir);
+				payload->localf = create_tempfile(payload, temporary_cachedir);
 				if(payload->localf == NULL) {
 					goto err;
 				}
@@ -1191,7 +1307,7 @@ int SYMEXPORT alpm_fetch_pkgurl(alpm_handle_t *handle, const alpm_list_t *urls,
 		event.type = ALPM_EVENT_PKG_RETRIEVE_START;
 		event.pkg_retrieve.num = alpm_list_count(payloads);
 		EVENT(handle, &event);
-		if(_alpm_download(handle, payloads, cachedir) == -1) {
+		if(_alpm_download(handle, payloads, cachedir, temporary_cachedir) == -1) {
 			_alpm_log(handle, ALPM_LOG_WARNING, _("failed to retrieve some files\n"));
 			event.type = ALPM_EVENT_PKG_RETRIEVE_FAILED;
 			EVENT(handle, &event);
@@ -1228,6 +1344,8 @@ int SYMEXPORT alpm_fetch_pkgurl(alpm_handle_t *handle, const alpm_list_t *urls,
 
 err:
 	alpm_list_free_inner(payloads, (alpm_list_fn_free)_alpm_dload_payload_reset);
+	_alpm_remove_temporary_download_dir(temporary_cachedir);
+	FREE(temporary_cachedir);
 	FREELIST(payloads);
 	FREELIST(*fetched);
 
