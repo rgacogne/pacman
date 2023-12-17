@@ -30,6 +30,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <pwd.h>
 
 #ifdef HAVE_NETINET_IN_H
 #include <netinet/in.h> /* IPPROTO_TCP */
@@ -69,6 +70,39 @@ static mode_t _getumask(void)
 	mode_t mask = umask(0);
 	umask(mask);
 	return mask;
+}
+
+static int intialize_download_file(const char *filename, const char *user)
+{
+	int fd;
+	struct passwd const *pw = NULL;
+
+	ASSERT(filename != NULL, return -1);
+	ASSERT(user != NULL, return -1);
+
+	ASSERT((fd = open(filename, O_CREAT | O_WRONLY, 0644)) != -1, return -1);
+	close(fd);
+
+	ASSERT((pw = getpwnam(user)) != NULL, return -1);
+	ASSERT(chown(filename, pw->pw_uid, pw->pw_gid) != -1, return -1);
+
+	return 0;
+}
+
+static int finalize_download_file(const char *filename)
+{
+	FILE *fp;
+	struct stat st;
+
+	ASSERT(stat(filename, &st) == 0, return -1);
+
+	if(st.st_size == 0) {
+		unlink(filename);
+	} else {
+		ASSERT(chown(filename, 0, 0) != -1, return -1);
+	}
+
+	return 0;
 }
 
 static FILE *create_tempfile(struct dload_payload *payload, const char *localpath)
