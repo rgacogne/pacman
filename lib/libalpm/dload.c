@@ -974,14 +974,14 @@ static int curl_download_internal_sandboxed(alpm_handle_t *handle,
 		/* cwd to the download directory */
 		ret = chdir(localpath);
 		if(ret != 0) {
-			handle->pm_errno = errno;
+			handle->pm_errno = ALPM_ERR_NOT_A_DIR;
 			_alpm_log(handle, ALPM_LOG_ERROR, _("could not chdir to download directory %s\n"), localpath);
 			ret = -1;
 		} else {
 			ret = alpm_sandbox_setup_child(handle->sandboxuser);
 			if (ret != 0) {
 				_alpm_log(handle, ALPM_LOG_ERROR, _("switching to sandbox user '%s' failed!\n"), handle->sandboxuser);
-				_Exit(ret | 128);
+				_Exit(2);
 			}
 
 			ret = curl_download_internal(handle, payloads);
@@ -994,11 +994,11 @@ static int curl_download_internal_sandboxed(alpm_handle_t *handle,
 		}
 		else if(ret == 1) {
 			/* no files were downloaded and all errors were non-fatal */
-			_Exit(handle->pm_errno);
+			_Exit(1);
 		}
 		else {
 			/* an error happened for a required file */
-			_Exit(handle->pm_errno | 128);
+			_Exit(2);
 		}
 	}
 
@@ -1044,13 +1044,13 @@ static int curl_download_internal_sandboxed(alpm_handle_t *handle,
 			else {
 				ret = WEXITSTATUS(ret);
 				if(ret != 0) {
-					if(ret & 128) {
+					if(ret == 2) {
 						/* an error happened for a required file, or unexpected exit status */
-						handle->pm_errno = ret & ~128;
+						handle->pm_errno = ALPM_ERR_RETRIEVE;
 						ret = -1;
 					}
 					else {
-						handle->pm_errno = ret;
+						handle->pm_errno = ALPM_ERR_RETRIEVE;
 						ret = 1;
 					}
 				}
@@ -1072,7 +1072,7 @@ static int curl_download_internal_sandboxed(alpm_handle_t *handle,
 		errno = err;
 		ret = -1;
 	}
-  return ret;
+	return ret;
 }
 
 #endif
