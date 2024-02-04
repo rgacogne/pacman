@@ -64,6 +64,16 @@ static const char *get_filename(const char *url)
 	return url;
 }
 
+static char *get_filename_with_suffix(const char *filename, const char *suffix)
+{
+	char *filename_with_suffix = NULL;
+
+	size_t filename_with_suffix_len = strlen(filename) + strlen(suffix) + 1;
+	MALLOC(filename_with_suffix, filename_with_suffix_len, return NULL);
+	snprintf(filename_with_suffix, filename_with_suffix_len, "%s%s", filename, suffix);
+	return filename_with_suffix;
+}
+
 /* prefix to avoid possible future clash with getumask(3) */
 static mode_t _getumask(void)
 {
@@ -72,7 +82,7 @@ static mode_t _getumask(void)
 	return mask;
 }
 
-static int intialize_download_file(const char *filename, const char *user)
+static int initialize_download_file(const char *filename, const char *user)
 {
 	int fd;
 	struct passwd const *pw = NULL;
@@ -91,9 +101,8 @@ static int intialize_download_file(const char *filename, const char *user)
 
 static int finalize_download_file(const char *filename)
 {
-	FILE *fp;
 	struct stat st;
-
+	ASSERT(filename != NULL, return -1);
 	ASSERT(stat(filename, &st) == 0, return -1);
 
 	if(st.st_size == 0) {
@@ -105,19 +114,55 @@ static int finalize_download_file(const char *filename)
 	return 0;
 }
 
-static FILE *create_tempfile(struct dload_payload *payload, const char *localpath)
+static int initialize_download_signature_file_if_needed(const char* filename, const char *suffix, const char *sandboxuser)
+{
+	ASSERT(filename != NULL, return 0);
+	ASSERT(suffix != NULL, return 0);
+	ASSERT(sandboxuser != NULL, return 0);
+
+	char *sigfile = get_filename_with_suffix(filename, suffix);
+	ASSERT(sigfile != NULL, return -1);
+	if(initialize_download_file(sigfile, sandboxuser)) {
+		free(sigfile);
+		return -1;
+	}
+	free(sigfile);
+	return 0;
+}
+
+static int finalize_download_signature_file_if_needed(const char* filename, const char *suffix)
+{
+	ASSERT(filename != NULL, return 0);
+	ASSERT(suffix != NULL, return 0);
+
+	char *sigfile = get_filename_with_suffix(filename, suffix);
+	ASSERT(sigfile != NULL, return -1);
+	if(finalize_download_file(sigfile)) {
+		free(sigfile);
+		return -1;
+	}
+	free(sigfile);
+	return 0;
+}
+
+static FILE *create_tempfile(struct dload_payload *payload, const char *localpath, const char *user)
 {
 	int fd;
 	FILE *fp;
 	char *randpath;
 	size_t len;
+	struct passwd const *pw = NULL;
 
+	if (user != NULL) {
+		ASSERT((pw = getpwnam(user)) != NULL, return NULL);
+	}
 	/* create a random filename, which is opened with O_EXCL */
 	len = strlen(localpath) + 14 + 1;
 	MALLOC(randpath, len, RET_ERR(payload->handle, ALPM_ERR_MEMORY, NULL));
 	snprintf(randpath, len, "%salpmtmp.XXXXXX", localpath);
 	if((fd = mkstemp(randpath)) == -1 ||
 			fchmod(fd, ~(_getumask()) & 0666) ||
+			(pw != NULL && fchown(fd, pw->pw_uid, pw->pw_gid)) ||
 			!(fp = fdopen(fd, payload->tempfile_openmode))) {
 		unlink(randpath);
 		close(fd);
@@ -132,7 +177,6 @@ static FILE *create_tempfile(struct dload_payload *payload, const char *localpat
 	free(payload->remote_name);
 	STRDUP(payload->remote_name, strrchr(randpath, '/') + 1,
 			fclose(fp); RET_ERR(payload->handle, ALPM_ERR_MEMORY, NULL));
-
 	return fp;
 }
 
@@ -693,7 +737,7 @@ static int curl_check_finished_download(alpm_handle_t *handle, CURLM *curlm, CUR
 		_alpm_log(handle, ALPM_LOG_DEBUG, "%s: file met time condition\n",
 			payload->remote_name);
 		ret = 1;
-		unlink(payload->tempfile_name);
+		truncate(payload->tempfile_name, 0);
 		goto cleanup;
 	}
 
@@ -721,19 +765,9 @@ cleanup:
 		utimes_long(payload->tempfile_name, remote_time);
 	}
 
-	if(ret == 0) {
-		if(payload->destfile_name) {
-			if(rename(payload->tempfile_name, payload->destfile_name)) {
-				_alpm_log(handle, ALPM_LOG_ERROR, _("could not rename %s to %s (%s)\n"),
-						payload->tempfile_name, payload->destfile_name, strerror(errno));
-				ret = -1;
-			}
-		}
-	}
-
 	if((ret == -1 || dload_interrupted) && payload->unlink_on_fail &&
 			payload->tempfile_name) {
-		unlink(payload->tempfile_name);
+		truncate(payload->tempfile_name, 0);
 	}
 
 	if(handle->dlcb) {
@@ -1005,7 +1039,7 @@ static int curl_download_internal_sandboxed(alpm_handle_t *handle,
 	/* parent */
 	close(callbacks_fd[1]);
 
-	if(pid != -1)  {
+	if(pid != -1) {
 		bool had_error = false;
 		while(true) {
 			_alpm_sandbox_callback_t callback_type;
@@ -1102,23 +1136,67 @@ int _alpm_download(alpm_handle_t *handle,
 		alpm_list_t *payloads /* struct dload_payload */,
 		const char *localpath)
 {
+	int ret = -1;
+	alpm_list_t *p;
+
 	if(handle->fetchcb == NULL) {
 #ifdef HAVE_LIBCURL
-		if(handle->sandboxuser) {
-			return curl_download_internal_sandboxed(handle, payloads, localpath);
-		} else {
-			return curl_download_internal(handle, payloads);
+		for(p = payloads; p; p = p->next) {
+			struct dload_payload *payload = p->data;
+			if(handle->sandboxuser && payload->destfile_name != NULL && initialize_download_file(payload->destfile_name, handle->sandboxuser)) {
+				return -1;
+			}
+			if(handle->sandboxuser && payload->tempfile_name && initialize_download_file(payload->tempfile_name, handle->sandboxuser)) {
+				return -1;
+			}
+			if(payload->download_signature) {
+				if(initialize_download_signature_file_if_needed(payload->destfile_name, ".sig", handle->sandboxuser)) {
+					return -1;
+				}
+				if(initialize_download_signature_file_if_needed(payload->destfile_name, ".sig.part", handle->sandboxuser)) {
+					return -1;
+				}
+				if(initialize_download_signature_file_if_needed(payload->tempfile_name, ".sig", handle->sandboxuser)) {
+					return -1;
+				}
+				if(initialize_download_signature_file_if_needed(payload->tempfile_name, ".sig.part", handle->sandboxuser)) {
+					return -1;
+				}
+			}
 		}
+		if(handle->sandboxuser) {
+			ret = curl_download_internal_sandboxed(handle, payloads, localpath);
+		} else {
+			ret = curl_download_internal(handle, payloads);
+		}
+		for(p = payloads; p; p = p->next) {
+			struct dload_payload *payload = p->data;
+			if(ret == 0) {
+				if(payload->destfile_name) {
+					if(rename(payload->tempfile_name, payload->destfile_name)) {
+						_alpm_log(handle, ALPM_LOG_ERROR, _("could not rename %s to %s (%s)\n"),
+						payload->tempfile_name, payload->destfile_name, strerror(errno));
+						ret = -1;
+					}
+				}
+			}
+			finalize_download_file(payload->destfile_name);
+			finalize_download_file(payload->tempfile_name);
+			finalize_download_signature_file_if_needed(payload->destfile_name, ".sig");
+			finalize_download_signature_file_if_needed(payload->destfile_name, ".sig.part");
+			finalize_download_signature_file_if_needed(payload->tempfile_name, ".sig");
+			finalize_download_signature_file_if_needed(payload->tempfile_name, ".sig.part");
+		}
+		return ret;
 #else
 		RET_ERR(handle, ALPM_ERR_EXTERNAL_DOWNLOAD, -1);
 #endif
 	} else {
-		alpm_list_t *p;
 		int updated = 0;
 		for(p = payloads; p; p = p->next) {
 			struct dload_payload *payload = p->data;
 			alpm_list_t *s;
-			int ret = -1;
+			ret = -1;
 
 			if(payload->fileurl) {
 				ret = handle->fetchcb(handle->fetchcb_ctx, payload->fileurl, localpath, payload->force);
@@ -1208,7 +1286,7 @@ int SYMEXPORT alpm_fetch_pkgurl(alpm_handle_t *handle, const alpm_list_t *urls,
 				payload->unlink_on_fail = 1;
 
 				payload->tempfile_openmode = "wb";
-				payload->localf = create_tempfile(payload, cachedir);
+				payload->localf = create_tempfile(payload, cachedir, handle->sandboxuser);
 				if(payload->localf == NULL) {
 					goto err;
 				}
