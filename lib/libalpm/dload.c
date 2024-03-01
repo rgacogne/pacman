@@ -83,7 +83,7 @@ static int finalize_download_file(const char *filename)
                 return 1;
 	}
 	ASSERT(chown(filename, 0, 0) != -1, return -1);
-	ASSERT(chmod(filename, 0600) != -1, return -1);
+	ASSERT(chmod(filename, ~(_getumask()) & 0666) != -1, return -1);
 	return 0;
 }
 
