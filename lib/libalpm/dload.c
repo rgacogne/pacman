@@ -1340,6 +1340,8 @@ int SYMEXPORT alpm_fetch_pkgurl(alpm_handle_t *handle, const alpm_list_t *urls,
 		FREELIST(payloads);
 	}
 
+	_alpm_remove_temporary_download_dir(temporary_cachedir);
+	FREE(temporary_cachedir);
 	return 0;
 
 err:
