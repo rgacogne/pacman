@@ -1127,20 +1127,26 @@ static int move_downloaded_file_from_temporary_cachedir(const char *temporary_fi
 	return 0;
 }
 
-static int move_downloaded_sig_file_from_temporary_cachedir(const char *temporary_filename,
+static void move_downloaded_sig_file_from_temporary_cachedir(const char *temporary_filename,
 		const char *local_path,
 		size_t local_path_len)
 {
-	ASSERT(temporary_filename != NULL, return -1);
-	ASSERT(local_path != NULL, return -1);
+	ASSERT(temporary_filename != NULL, return);
+	ASSERT(local_path != NULL, return);
 	const char sig_suffix[] = ".sig";
 	char *sig_filename = NULL;
 	size_t sig_filename_len = strlen(temporary_filename) + sizeof(sig_suffix);
-	MALLOC(sig_filename, sig_filename_len, return -1);
+	MALLOC(sig_filename, sig_filename_len, return);
 	snprintf(sig_filename, sig_filename_len, "%s%s", temporary_filename, sig_suffix);
-	int ret = move_downloaded_file_from_temporary_cachedir(sig_filename, local_path, local_path_len);
+	move_downloaded_file_from_temporary_cachedir(sig_filename, local_path, local_path_len);
 	FREE(sig_filename);
-	return ret;
+	const char sig_part_suffix[] = ".sig.part";
+	char *sig_part_filename = NULL;
+	size_t sig_part_filename_len = strlen(temporary_filename) + sizeof(sig_part_suffix);
+	MALLOC(sig_part_filename, sig_part_filename_len, return);
+	snprintf(sig_part_filename, sig_part_filename_len, "%s%s", temporary_filename, sig_part_suffix);
+	move_downloaded_file_from_temporary_cachedir(sig_part_filename, local_path, local_path_len);
+	FREE(sig_part_filename);
 }
 
 static int move_downloaded_files_from_temporary_cachedir(alpm_list_t *payloads,
@@ -1150,20 +1156,24 @@ static int move_downloaded_files_from_temporary_cachedir(alpm_list_t *payloads,
 	ASSERT(localpath != NULL, return -1);
 	alpm_list_t *p;
 	size_t localpathlen = strlen(localpath);
+	int returnvalue = 0;
 	for(p = payloads; p; p = p->next) {
 		struct dload_payload *payload = p->data;
+		if(payload->tempfile_name) {
+			move_downloaded_file_from_temporary_cachedir(payload->tempfile_name, localpath, localpathlen);
+		}
 		if(payload->destfile_name) {
 			int ret = move_downloaded_file_from_temporary_cachedir(payload->destfile_name, localpath, localpathlen);
 
 			if(ret == -1) {
-				return -1;
+				returnvalue = -1;
 			}
 		}
 		if (payload->download_signature) {
 			move_downloaded_sig_file_from_temporary_cachedir(payload->destfile_name, localpath, localpathlen);
 		}
 	}
-	return 0;
+	return returnvalue;
 }
 
 /* Returns -1 if an error happened for a required file
