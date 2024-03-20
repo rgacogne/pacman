@@ -1113,14 +1113,13 @@ static int move_downloaded_file_from_temporary_cachedir(const char *temporary_fi
 	if(ret != 0) {
 		return ret;
 	}
-	char *filename = basename(temporary_filename);
+	const char *filename = mbasename(temporary_filename);
 	char *dest = NULL;
 	size_t destlen = local_path_len + 1 + strlen(filename) + 1;
-	MALLOC(dest, destlen, FREE(filename); return -1);
+	MALLOC(dest, destlen, return -1);
 	snprintf(dest, destlen, "%s/%s", local_path, filename);
 	if(rename(temporary_filename, dest)) {
 		FREE(dest);
-		FREE(filename);
 		return -1;
 	}
 	FREE(dest);
