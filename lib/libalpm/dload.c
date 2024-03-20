@@ -602,7 +602,6 @@ static int curl_check_finished_download(alpm_handle_t *handle, CURLM *curlm, CUR
 				(*active_downloads_num)++;
 				return 2;
 			} else {
-				payload->unlink_on_fail = 1;
 				goto cleanup;
 			}
 		default:
