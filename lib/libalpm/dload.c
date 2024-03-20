@@ -1175,6 +1175,44 @@ static int move_downloaded_files_from_temporary_cachedir(alpm_list_t *payloads,
 	return returnvalue;
 }
 
+static void restore_resumable_download_files_to_temporary_cachedir(alpm_list_t *payloads,
+		const char *localpath,
+		const char *user)
+{
+	struct passwd const *pw = NULL;
+	ASSERT(payloads != NULL, return);
+	ASSERT(localpath != NULL, return);
+	if(user != NULL) {
+		ASSERT((pw = getpwnam(user)) != NULL, return);
+	}
+	alpm_list_t *p;
+	size_t localpathlen = strlen(localpath);
+	for(p = payloads; p; p = p->next) {
+		struct dload_payload *payload = p->data;
+		if(!payload->tempfile_name) {
+			continue;
+                }
+		const char *filename = mbasename(payload->tempfile_name);
+		char *src = NULL;
+		size_t srclen = localpathlen + 1 + strlen(filename) + 1;
+		MALLOC(src, srclen, continue);
+		snprintf(src, srclen, "%s/%s", localpath, filename);
+		struct stat st;
+		if(stat(src, &st) != 0 || st.st_size == 0) {
+			FREE(src);
+			continue;
+		}
+		if(rename(src, payload->tempfile_name) != 0) {
+			FREE(src);
+			continue;
+		}
+		if(pw != NULL) {
+			chown(payload->tempfile_name, pw->pw_uid, pw->pw_gid);
+		}
+		FREE(src);
+	}
+}
+
 /* Returns -1 if an error happened for a required file
  * Returns 0 if a payload was actually downloaded
  * Returns 1 if no files were downloaded and all errors were non-fatal
@@ -1185,6 +1223,7 @@ int _alpm_download(alpm_handle_t *handle,
 		const char *temporary_localpath)
 {
 	int ret;
+	restore_resumable_download_files_to_temporary_cachedir(payloads, localpath, handle->sandboxuser);
 	if(handle->fetchcb == NULL) {
 #ifdef HAVE_LIBCURL
 		if(handle->sandboxuser) {
